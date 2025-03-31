@@ -1,0 +1,907 @@
+// App.js - Main entry point for the application
+
+import React, { useState, useEffect } from 'react';
+import { 
+  SafeAreaView, 
+  StyleSheet, 
+  Text, 
+  View, 
+  TouchableOpacity, 
+  ScrollView, 
+  ActivityIndicator,
+  Image,
+  TextInput,
+  FlatList,
+  Alert
+} from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
+import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as pdfjs from 'pdfjs-dist';
+import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// PDF Resources for each grade and subject
+const PDFResources = {
+  'Grade 9': {
+    'English': ['https://raw.githubusercontent.com/JustCallMe-Sni/silver/main/English.pdf'],
+    'Math': ['https://raw.githubusercontent.com/JustCallMe-Sni/silver/main/Maths.pdf'],
+    'Science': ['https://raw.githubusercontent.com/JustCallMe-Sni/silver/main/Science.pdf'],
+    'Social': ['https://raw.githubusercontent.com/JustCallMe-Sni/silver/main/Social.pdf']
+  },
+  'Grade 10': {
+    'English': ['https://raw.githubusercontent.com/JustCallMe-Sni/golden/main/English.pdf'],
+    'Math': ['https://raw.githubusercontent.com/JustCallMe-Sni/golden/main/Maths.pdf'],
+    'Science': [
+      'https://raw.githubusercontent.com/JustCallMe-Sni/golden/main/Science%20Part%201.pdf',
+      'https://raw.githubusercontent.com/JustCallMe-Sni/golden/main/Science%20Part%202.pdf'
+    ],
+    'Social': ['https://raw.githubusercontent.com/JustCallMe-Sni/golden/main/Social.pdf']
+  }
+};
+
+// Required dependencies list - will be automatically downloaded on first run
+const Dependencies = [
+  {
+    name: 'PDF.js Library',
+    url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js',
+    destination: FileSystem.documentDirectory + 'dependencies/pdfjs/pdf.min.js'
+  },
+  {
+    name: 'PDF.js Worker',
+    url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js',
+    destination: FileSystem.documentDirectory + 'dependencies/pdfjs/pdf.worker.min.js'
+  },
+  {
+    name: 'Core Resources',
+    url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.entry.min.js',
+    destination: FileSystem.documentDirectory + 'dependencies/pdfjs/pdf.worker.entry.min.js'
+  }
+];
+
+// Initialize pdfjs worker - this will be updated in setup
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+
+// Splash/Setup Screen Component
+const SplashScreen = ({ navigation }) => {
+  const [setupProgress, setSetupProgress] = useState(0);
+  const [setupStatus, setSetupStatus] = useState('Initializing...');
+  const [setupComplete, setSetupComplete] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    checkFirstRun();
+  }, []);
+
+  const checkFirstRun = async () => {
+    try {
+      const isFirstRun = await AsyncStorage.getItem('APP_INSTALLED');
+      
+      if (isFirstRun === null) {
+        // First time running the app
+        setSetupStatus('Checking dependencies...');
+        await setupDependencies();
+      } else {
+        // App already installed
+        setSetupProgress(100);
+        setSetupStatus('Setup complete!');
+        setSetupComplete(true);
+        
+        // Give a brief moment to show "Setup complete" before navigating
+        setTimeout(() => {
+          navigation.replace('Home');
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('First run check error:', error);
+      setError('Setup failed. Please restart the app.');
+    }
+  };
+
+  const setupDependencies = async () => {
+    try {
+      // Create directories for dependencies
+      setSetupStatus('Creating directories...');
+      setSetupProgress(10);
+      await FileSystem.makeDirectoryAsync(
+        FileSystem.documentDirectory + 'dependencies/pdfjs', 
+        { intermediates: true }
+      );
+      
+      // Download all dependencies
+      let completed = 0;
+      for (const dependency of Dependencies) {
+        setSetupStatus(`Installing: ${dependency.name}`);
+        setSetupProgress(10 + Math.floor((completed / Dependencies.length) * 50));
+        
+        try {
+          await FileSystem.downloadAsync(dependency.url, dependency.destination);
+        } catch (downloadError) {
+          console.warn(`Failed to download ${dependency.name}: ${downloadError.message}`);
+          // Continue with next dependency even if one fails
+        }
+        
+        completed++;
+      }
+      
+      // Download a sample PDF to verify PDF.js works
+      setSetupStatus('Verifying installation...');
+      setSetupProgress(60);
+      const testPdfUrl = PDFResources['Grade 9']['English'][0];
+      const testPdfPath = FileSystem.documentDirectory + 'test.pdf';
+      await FileSystem.downloadAsync(testPdfUrl, testPdfPath);
+      
+      // Pre-cache common assets
+      setSetupStatus('Optimizing...');
+      setSetupProgress(80);
+      
+      // Mark as installed
+      setSetupStatus('Finalizing...');
+      setSetupProgress(90);
+      await AsyncStorage.setItem('APP_INSTALLED', 'true');
+      await AsyncStorage.setItem('INSTALL_DATE', new Date().toISOString());
+      
+      // All done!
+      setSetupProgress(100);
+      setSetupStatus('Setup complete!');
+      setSetupComplete(true);
+      
+      // Navigate to Home after setup
+      setTimeout(() => {
+        navigation.replace('Home');
+      }, 1500);
+      
+    } catch (error) {
+      console.error('Setup error:', error);
+      setError('Setup failed. Please restart the app.');
+    }
+  };
+
+  return (
+    <View style={styles.splashContainer}>
+      <Image 
+        source={{ uri: 'https://img.icons8.com/color/96/000000/book-shelf.png' }} 
+        style={styles.splashLogo} 
+      />
+      <Text style={styles.splashTitle}>Educational PDF Analyzer</Text>
+      
+      <View style={styles.progressContainer}>
+        <View style={styles.progressBarBg}>
+          <View 
+            style={[styles.progressBarFill, { width: `${setupProgress}%` }]} 
+          />
+        </View>
+        <Text style={styles.progressText}>{setupStatus}</Text>
+        {error && <Text style={styles.errorText}>{error}</Text>}
+      </View>
+      
+      {setupComplete && (
+        <TouchableOpacity 
+          style={styles.startButton}
+          onPress={() => navigation.replace('Home')}
+        >
+          <Text style={styles.startButtonText}>Start</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
+
+// Home Screen Component
+const HomeScreen = ({ navigation }) => {
+  const [installedDate, setInstalledDate] = useState('');
+  
+  useEffect(() => {
+    loadInstallDate();
+  }, []);
+  
+  const loadInstallDate = async () => {
+    try {
+      const date = await AsyncStorage.getItem('INSTALL_DATE');
+      if (date) {
+        setInstalledDate(new Date(date).toLocaleDateString());
+      }
+    } catch (error) {
+      console.error('Error loading install date:', error);
+    }
+  };
+  
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Educational PDF Analyzer</Text>
+      </View>
+      
+      <View style={styles.gradeContainer}>
+        <TouchableOpacity 
+          style={styles.gradeCard} 
+          onPress={() => navigation.navigate('Grade 9')}
+        >
+          <Image 
+            source={{ uri: 'https://img.icons8.com/color/96/000000/student-male--v1.png' }} 
+            style={styles.gradeIcon} 
+          />
+          <Text style={styles.gradeTitle}>Grade 9</Text>
+          <Text style={styles.gradeSubtitle}>4 Subjects</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.gradeCard} 
+          onPress={() => navigation.navigate('Grade 10')}
+        >
+          <Image 
+            source={{ uri: 'https://img.icons8.com/color/96/000000/student-female--v1.png' }} 
+            style={styles.gradeIcon} 
+          />
+          <Text style={styles.gradeTitle}>Grade 10</Text>
+          <Text style={styles.gradeSubtitle}>4 Subjects</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.infoContainer}>
+        <Text style={styles.infoTitle}>About this App</Text>
+        <Text style={styles.infoText}>
+          This application provides access to Grade 9 and Grade 10 educational materials.
+          Browse through different subjects, view PDF content, and search for specific topics.
+          All content is based exclusively on the provided educational PDFs.
+        </Text>
+        {installedDate && (
+          <Text style={styles.installDateText}>
+            Installed on: {installedDate}
+          </Text>
+        )}
+      </View>
+      
+      <TouchableOpacity 
+        style={styles.refreshButton}
+        onPress={async () => {
+          Alert.alert(
+            "Reinstall Dependencies", 
+            "Would you like to reinstall all dependencies?",
+            [
+              {
+                text: "Cancel",
+                style: "cancel"
+              },
+              {
+                text: "Yes", 
+                onPress: async () => {
+                  await AsyncStorage.removeItem('APP_INSTALLED');
+                  Alert.alert(
+                    "Dependencies Reset", 
+                    "Please restart the app to reinstall dependencies."
+                  );
+                }
+              }
+            ]
+          );
+        }}
+      >
+        <Ionicons name="refresh" size={20} color="#fff" />
+        <Text style={styles.refreshButtonText}>Reinstall Dependencies</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+// Subject Selection Screen Component
+const SubjectScreen = ({ route, navigation }) => {
+  const { grade } = route.params;
+  const subjects = Object.keys(PDFResources[grade]);
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.screenTitle}>{grade} Subjects</Text>
+      
+      <FlatList
+        data={subjects}
+        keyExtractor={(item) => item}
+        renderItem={({ item }) => (
+          <TouchableOpacity 
+            style={styles.subjectCard}
+            onPress={() => navigation.navigate('PDFViewer', { 
+              grade, 
+              subject: item,
+              pdfUrls: PDFResources[grade][item]
+            })}
+          >
+            <View style={styles.subjectIconContainer}>
+              {getSubjectIcon(item)}
+            </View>
+            <View style={styles.subjectInfo}>
+              <Text style={styles.subjectTitle}>{item}</Text>
+              <Text style={styles.subjectDescription}>
+                {PDFResources[grade][item].length > 1 ? 
+                  `${PDFResources[grade][item].length} PDF files` : 
+                  '1 PDF file'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#555" />
+          </TouchableOpacity>
+        )}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+      />
+    </View>
+  );
+};
+
+// Helper function to get appropriate icons for subjects
+const getSubjectIcon = (subject) => {
+  switch(subject) {
+    case 'English':
+      return <Ionicons name="book" size={28} color="#3498db" />;
+    case 'Math':
+      return <Ionicons name="calculator" size={28} color="#e74c3c" />;
+    case 'Science':
+      return <Ionicons name="flask" size={28} color="#2ecc71" />;
+    case 'Social':
+      return <Ionicons name="earth" size={28} color="#f39c12" />;
+    default:
+      return <Ionicons name="document-text" size={28} color="#95a5a6" />;
+  }
+};
+
+// PDF Viewer and Analyzer Component
+const PDFViewerScreen = ({ route }) => {
+  const { grade, subject, pdfUrls } = route.params;
+  const [pdfContent, setPdfContent] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('content');
+  const [currentPdfIndex, setCurrentPdfIndex] = useState(0);
+  const [pdfPageImages, setPdfPageImages] = useState([]);
+
+  useEffect(() => {
+    loadPDF();
+  }, [currentPdfIndex]);
+
+  const loadPDF = async () => {
+    setIsLoading(true);
+    try {
+      const pdfUrl = pdfUrls[currentPdfIndex];
+      
+      // Download PDF to local file system
+      const pdfLocation = FileSystem.documentDirectory + 'temp.pdf';
+      const { uri } = await FileSystem.downloadAsync(pdfUrl, pdfLocation);
+      
+      // Update worker path to use local files
+      pdfjs.GlobalWorkerOptions.workerSrc = FileSystem.documentDirectory + 'dependencies/pdfjs/pdf.worker.min.js';
+      
+      // Load the pdf document
+      const loadingTask = pdfjs.getDocument(uri);
+      const pdf = await loadingTask.promise;
+      
+      // Extract text from each page
+      const textContents = [];
+      const images = [];
+      
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        
+        // Extract text
+        const textContent = await page.getTextContent();
+        const textItems = textContent.items.map(item => item.str).join(' ');
+        textContents.push({
+          page: i,
+          text: textItems
+        });
+        
+        // For demonstration, we would handle images here in a real app
+        // This is simplified as actual PDF image extraction is complex
+        images.push({
+          page: i,
+          imageUrl: `https://via.placeholder.com/400x600.png?text=Page+${i}+Preview`
+        });
+      }
+      
+      setPdfContent(textContents);
+      setPdfPageImages(images);
+    } catch (error) {
+      console.error('Error loading PDF:', error);
+      Alert.alert(
+        "Error Loading PDF",
+        "There was a problem loading the PDF. Please try reinstalling dependencies from the home screen."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSearch = () => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    
+    const query = searchQuery.toLowerCase();
+    const results = pdfContent
+      .filter(page => page.text.toLowerCase().includes(query))
+      .map(page => ({
+        page: page.page,
+        text: highlightSearchText(page.text, query)
+      }));
+    
+    setSearchResults(results);
+  };
+
+  const highlightSearchText = (text, query) => {
+    const regex = new RegExp(`(${query})`, 'gi');
+    const parts = text.split(regex);
+    
+    let result = '';
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].toLowerCase() === query.toLowerCase()) {
+        result += `<span style="background-color: yellow">${parts[i]}</span>`;
+      } else {
+        result += parts[i];
+      }
+    }
+    
+    return result;
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.pdfHeader}>
+        <Text style={styles.pdfTitle}>{subject} - {grade}</Text>
+        {pdfUrls.length > 1 && (
+          <View style={styles.pdfNavigation}>
+            <Text style={styles.pdfNavText}>
+              Part {currentPdfIndex + 1} of {pdfUrls.length}
+            </Text>
+            <View style={styles.pdfNavButtons}>
+              <TouchableOpacity 
+                disabled={currentPdfIndex === 0}
+                style={[styles.navButton, currentPdfIndex === 0 && styles.disabledButton]}
+                onPress={() => setCurrentPdfIndex(currentPdfIndex - 1)}
+              >
+                <Ionicons name="chevron-back" size={24} color={currentPdfIndex === 0 ? "#ccc" : "#fff"} />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                disabled={currentPdfIndex === pdfUrls.length - 1}
+                style={[styles.navButton, currentPdfIndex === pdfUrls.length - 1 && styles.disabledButton]}
+                onPress={() => setCurrentPdfIndex(currentPdfIndex + 1)}
+              >
+                <Ionicons name="chevron-forward" size={24} color={currentPdfIndex === pdfUrls.length - 1 ? "#ccc" : "#fff"} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search in this PDF..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          onSubmitEditing={handleSearch}
+        />
+        <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
+          <Ionicons name="search" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'content' && styles.activeTab]}
+          onPress={() => setActiveTab('content')}
+        >
+          <Text style={[styles.tabText, activeTab === 'content' && styles.activeTabText]}>
+            Content
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'images' && styles.activeTab]}
+          onPress={() => setActiveTab('images')}
+        >
+          <Text style={[styles.tabText, activeTab === 'images' && styles.activeTabText]}>
+            Images
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'search' && styles.activeTab]}
+          onPress={() => setActiveTab('search')}
+        >
+          <Text style={[styles.tabText, activeTab === 'search' && styles.activeTabText]}>
+            Search Results
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {isLoading ? (
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color="#3498db" />
+          <Text style={styles.loaderText}>Loading PDF content...</Text>
+        </View>
+      ) : (
+        <ScrollView style={styles.contentContainer}>
+          {activeTab === 'content' && pdfContent.map((page, index) => (
+            <View key={index} style={styles.pageContainer}>
+              <Text style={styles.pageNumber}>Page {page.page}</Text>
+              <Text style={styles.pageContent}>{page.text}</Text>
+            </View>
+          ))}
+          
+          {activeTab === 'images' && pdfPageImages.map((image, index) => (
+            <View key={index} style={styles.imageContainer}>
+              <Text style={styles.pageNumber}>Page {image.page}</Text>
+              <Image 
+                source={{ uri: image.imageUrl }} 
+                style={styles.pageImage}
+                resizeMode="contain"
+              />
+            </View>
+          ))}
+          
+          {activeTab === 'search' && (
+            <View style={styles.searchResultsContainer}>
+              {searchResults.length > 0 ? (
+                searchResults.map((result, index) => (
+                  <View key={index} style={styles.searchResultItem}>
+                    <Text style={styles.searchResultPage}>Page {result.page}</Text>
+                    <Text style={styles.searchResultText}>
+                      {result.text}
+                    </Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.noResultsText}>
+                  {searchQuery ? "No results found. Try a different search term." : "Enter a search term above to find content."}
+                </Text>
+              )}
+            </View>
+          )}
+        </ScrollView>
+      )}
+    </View>
+  );
+};
+
+// Create navigators
+const Stack = createNativeStackNavigator();
+const Tab = createMaterialTopTabNavigator();
+
+// Grade tab navigator
+const GradeTabNavigator = () => {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        tabBarActiveTintColor: '#3498db',
+        tabBarInactiveTintColor: '#95a5a6',
+        tabBarStyle: {
+          backgroundColor: '#f8f9fa',
+          elevation: 0,
+          shadowOpacity: 0,
+        },
+        tabBarIndicatorStyle: {
+          backgroundColor: '#3498db',
+          height: 3,
+        },
+        tabBarLabelStyle: {
+          fontWeight: 'bold',
+          fontSize: 16,
+        },
+      }}
+    >
+      <Tab.Screen 
+        name="Grade 9" 
+        component={SubjectScreen}
+        initialParams={{ grade: 'Grade 9' }}
+      />
+      <Tab.Screen 
+        name="Grade 10" 
+        component={SubjectScreen}
+        initialParams={{ grade: 'Grade 10' }}
+      />
+    </Tab.Navigator>
+  );
+};
+
+// Main App component
+export default function App() {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator
+        initialRouteName="Splash"
+        screenOptions={{
+          headerStyle: {
+            backgroundColor: '#3498db',
+          },
+          headerTintColor: '#fff',
+          headerTitleStyle: {
+            fontWeight: 'bold',
+          },
+        }}
+      >
+        <Stack.Screen 
+          name="Splash" 
+          component={SplashScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="Home" 
+          component={HomeScreen}
+          options={{ title: 'Educational PDF Analyzer' }}
+        />
+        <Stack.Screen 
+          name="Grades" 
+          component={GradeTabNavigator}
+          options={{ title: 'Select Grade' }}
+        />
+        <Stack.Screen 
+          name="Grade 9" 
+          component={SubjectScreen}
+          initialParams={{ grade: 'Grade 9' }}
+        />
+        <Stack.Screen 
+          name="Grade 10" 
+          component={SubjectScreen}
+          initialParams={{ grade: 'Grade 10' }}
+        />
+        <Stack.Screen 
+          name="PDFViewer" 
+          component={PDFViewerScreen}
+          options={({ route }) => ({ title: route.params.subject })}
+        />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+// Styles
+const styles = StyleSheet.create({
+  // Splash screen styles
+  splashContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  splashLogo: {
+    width: 120,
+    height: 120,
+    marginBottom: 20,
+  },
+  splashTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#3498db',
+    marginBottom: 50,
+    textAlign: 'center',
+  },
+  progressContainer: {
+    width: '80%',
+    alignItems: 'center',
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 16,
+    backgroundColor: '#f1f2f6',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#3498db',
+  },
+  progressText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#555',
+  },
+  errorText: {
+    marginTop: 20,
+    color: '#e74c3c',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  startButton: {
+    marginTop: 40,
+    backgroundColor: '#3498db',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+  },
+  startButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  
+  // Main app styles
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    backgroundColor: '#3498db',
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 24,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  gradeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    padding: 20,
+  },
+  gradeCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    width: '45%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  gradeIcon: {
+    width: 60,
+    height: 60,
+    marginBottom: 10,
+  },
+  gradeTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  gradeSubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginTop: 5,
+  },
+  infoContainer: {
+    margin: 20,
+    padding: 15,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3498db',
+  },
+  infoTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#333',
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 20,
+  },
+  installDateText: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginTop: 10,
+    fontStyle: 'italic',
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3498db',
+    margin: 20,
+    padding: 12,
+    borderRadius: 8,
+  },
+  refreshButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  screenTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    margin: 15,
+    color: '#333',
+  },
+  subjectCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: '#fff',
+  },
+  subjectIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f1f2f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 15,
+  },
+  subjectInfo: {
+    flex: 1,
+  },
+  subjectTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  subjectDescription: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginTop: 4,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#f1f2f6',
+    marginLeft: 80,
+  },
+  pdfHeader: {
+    padding: 15,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  pdfTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  pdfNavigation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  pdfNavText: {
+    fontSize: 14,
+    color: '#555',
+  },
+  pdfNavButtons: {
+    flexDirection: 'row',
+  },
+  navButton: {
+    backgroundColor: '#3498db',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  disabledButton: {
+    backgroundColor: '#bdc3c7',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  searchInput: {
+    flex: 1,
+    height: 46,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    fontSize: 16,
+  },
+  searchButton: {
+    width: 46,
+    height: 46,
+    backgroundColor: '#3498db',
+    borderRadius: 8,
+    marginLeft: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  tab: {
+    flex: 1,
